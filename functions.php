@@ -53,6 +53,18 @@ function writeToCSV($csv, $row) {
 	fclose($handle);
 }
 
+function clearFile($path) {
+	file_put_contents($path, "");
+}
+
+function removeSpaces($string) {
+
+	$string = str_replace('&nbsp;', ' ', $string);
+	$string = trim(preg_replace('/\t+/', '', $string));
+	return $string;
+
+}
+
 function _log($message) {
 	echo $message . PHP_EOL;
 }
