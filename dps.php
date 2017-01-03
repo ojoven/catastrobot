@@ -90,136 +90,152 @@ foreach ($streets as $street) {
 
 		// First we check if the portal for that street is already saved
 		$pathToPortalStreet = $folderDps . '/' . $street . '_' . $portal . '.html';
+
 		if (file_exists($pathToPortalStreet)) {
-			//continue;
-		}
 
-		$params = array(
-			'municipio' => $municipio,
-			'calle' => iconv("UTF-8", "ISO-8859-1", $street),
-			'portal' => $portal
-		);
+			// If saved, we get the HTML from it
+			$htmlResponse = file_get_contents($pathToPortalStreet);
 
-		$htmlStringObjectMoved = curlPostViaShell($urlPost, $params);
+		} else {
 
-		// We parse the DOM of the HTML requested
-		$htmlObjectMoved = str_get_html($htmlStringObjectMoved);
+			$params = array(
+				'municipio' => $municipio,
+				'calle' => iconv("UTF-8", "ISO-8859-1", $street),
+				'portal' => $portal
+			);
 
-		// The link is correct if we get a Object Moved on <h1> tag
-		$correctLink = $htmlObjectMoved->find('h1', 0);
+			$htmlStringObjectMoved = curlPostViaShell($urlPost, $params);
 
-		if ($correctLink) {
+			// We parse the DOM of the HTML requested
+			$htmlObjectMoved = str_get_html($htmlStringObjectMoved);
+
+			// The link is correct if we get a Object Moved on <h1> tag
+			$correctLink = $htmlObjectMoved->find('h1', 0);
+
+			if (!$correctLink) continue;
 
 			// We get the link
 			$link = $htmlObjectMoved->find('a', 0);
 
-			if ($link) {
-				$propertyReferer = 'http://www4.gipuzkoa.net/ogasuna/catastro/refCatastral.asp';
-				$propertyUrl = $link->href;
-				$propertyUrl = htmlspecialchars_decode($propertyUrl);
-				$url = $urlBase . $propertyUrl;
-				$htmlResponse = getURLWithReferer($url, $urlReferer);
+			if (!$link) continue;
 
-				// We save the HTML
-				file_put_contents($pathToPortalStreet, $htmlResponse);
+			$propertyReferer = 'http://www4.gipuzkoa.net/ogasuna/catastro/refCatastral.asp';
+			$propertyUrl = $link->href;
+			$propertyUrl = htmlspecialchars_decode($propertyUrl);
+			$url = $urlBase . $propertyUrl;
+			$htmlResponse = getURLWithReferer($url, $urlReferer);
 
-				// We save the info of the portal to portals.csv
-				$html = str_get_html($htmlResponse);
-				$portalInfoArray = array();
+			// We save the HTML
+			file_put_contents($pathToPortalStreet, $htmlResponse);
 
-				foreach ($html->find('td') as $td) {
-					$possibleTdText = $td->plaintext;
-					if (strpos($possibleTdText, ':') !== false && strlen(trim($possibleTdText)) < 80) { // It's one of the table cells with info
-						$possibleTdArray = explode(':', $possibleTdText);
+		}
 
-						$portalInfoArray[] = $possibleTdArray;
-					}
+		// We save the info of the portal to portals.csv
+		$html = str_get_html($htmlResponse);
+		$portalInfoArray = array();
+
+		foreach ($html->find('td') as $td) {
+			$possibleTdText = $td->plaintext;
+			if (strpos($possibleTdText, ':') !== false && strlen(trim($possibleTdText)) < 80) { // It's one of the table cells with info
+				$possibleTdArray = explode(':', $possibleTdText);
+
+				$portalInfoArray[] = $possibleTdArray;
+			}
+		}
+
+		$portalRow = array(
+			removeSpaces($portalInfoArray[2][1]), // calle
+			removeSpaces($portalInfoArray[4][1]), // portal
+			removeSpaces($portalInfoArray[3][1]), // ref. catastral
+			removeSpaces($portalInfoArray[1][1]), // zona
+			removeSpaces($portalInfoArray[5][1]), // superficie parcela
+		);
+
+		writeToCSV($pathToPortalsCSV, $portalRow);
+
+		// We get now the HTMLs for each property
+		foreach ($html->find('tr') as $tr) {
+
+			$firstTdLink = $tr->find('a', 0);
+			if (!$firstTdLink) continue;
+
+			$onclick = $firstTdLink->getAttribute('onclick');
+
+			if (!$onclick) continue;
+
+			$firstTdText = $firstTdLink->plaintext;
+
+			$propertyValues = explode('&nbsp;', $firstTdText);
+
+			$url = $urlBase . 'finca.asp';
+			$params = array(
+				'idFinca' => $propertyValues[0],
+				'codDigito' => $propertyValues[1]
+			);
+
+			if (in_array($propertyValues[0], $alreadyProperties)) continue;
+
+			$alreadyProperties[] = $propertyValues[0];
+			$alreadyProperties = array_slice($alreadyProperties, -10, 10);
+			print_r($alreadyProperties);
+
+			_log('Getting info property: ' . $propertyValues[0]);
+
+			$pathToProperty = $folderProperties . '/' . $street . '_' . $portal . '_'. $propertyValues[0] . '.html';
+
+			if (file_exists($pathToProperty)) {
+
+				$htmlResponseProperty = file_get_contents($pathToProperty);
+
+			} else {
+
+				$htmlResponseProperty = curlPost($url, $params, $propertyReferer);
+				file_put_contents($pathToProperty, $htmlResponseProperty);
+				chmod($pathToProperty, 0777);
+			}
+
+			// We save the info of the property to properties.csv
+			$html = str_get_html($htmlResponseProperty);
+			$propertyInfoArray = array();
+
+			if (!$html) continue;
+
+			foreach ($html->find('td') as $td) {
+				$possibleTdText = $td->plaintext;
+				if (strpos($possibleTdText, ':') !== false && strlen(trim($possibleTdText)) < 80) { // It's one of the table cells with info
+					$possibleTdArray = explode(':', $possibleTdText);
+
+					$propertyInfoArray[] = $possibleTdArray;
+				}
+			}
+
+			if (strpos($propertyInfoArray[0][0], 'Año')) {
+				unset($propertyInfoArray[0]);
+				$propertyInfoArray = array_values($propertyInfoArray);
+			}
+
+			$propertyRow = array(
+				removeSpaces($propertyInfoArray[3][1]), // calle
+				removeSpaces($propertyInfoArray[5][1]), // portal
+				removeSpaces($propertyInfoArray[1][1]), // finca
+				removeSpaces($propertyInfoArray[4][1]), // ref. catastral
+				removeSpaces($propertyInfoArray[2][1]), // zona
+				str_replace('&euro;', '', removeSpaces($propertyInfoArray[6][1])), // valor suelo
+				str_replace('&euro;', '', removeSpaces($propertyInfoArray[7][1])), // valor catastral
+			);
+
+			// Now we get the info from locals
+			$tableToSearchIn = $html->find('table', 12);
+			foreach ($tableToSearchIn->find('tr') as $index => $localRow) {
+				if ($index == 0 || $index == 1) continue;
+
+				$propertyRowCopy = $propertyRow;
+
+				foreach ($localRow->find('td') as $td) {
+					$propertyRowCopy[] = $td->plaintext;
 				}
 
-				$portalRow = array(
-					removeSpaces($portalInfoArray[2][1]), // calle
-					removeSpaces($portalInfoArray[4][1]), // portal
-					removeSpaces($portalInfoArray[3][1]), // ref. catastral
-					removeSpaces($portalInfoArray[1][1]), // zona
-					removeSpaces($portalInfoArray[5][1]), // superficie parcela
-				);
-
-				writeToCSV($pathToPortalsCSV, $portalRow);
-
-				// We get now the HTMLs for each property
-				foreach ($html->find('tr') as $tr) {
-
-					$firstTdLink = $tr->find('a', 0);
-					if (!$firstTdLink) continue;
-
-					$onclick = $firstTdLink->getAttribute('onclick');
-
-					if ($onclick) {
-						$firstTdText = $firstTdLink->plaintext;
-
-						$propertyValues = explode('&nbsp;', $firstTdText);
-
-						$url = $urlBase . 'finca.asp';
-						$params = array(
-							'idFinca' => $propertyValues[0],
-							'codDigito' => $propertyValues[1]
-						);
-
-						if (in_array($propertyValues[0], $alreadyProperties)) continue;
-
-						$alreadyProperties[] = $propertyValues[0];
-						$alreadyProperties = array_slice($alreadyProperties, -10, 10);
-						print_r($alreadyProperties);
-
-						_log('Getting info property: ' . $propertyValues[0]);
-
-						$pathToProperty = $folderProperties . '/' . $street . '_' . $portal . '_'. $propertyValues[0] . '.html';
-						$htmlResponseProperty = curlPost($url, $params, $propertyReferer);
-						file_put_contents($pathToProperty, $htmlResponseProperty);
-						chmod($pathToProperty, 0777);
-
-						// We save the info of the property to properties.csv
-						$html = str_get_html($htmlResponseProperty);
-						$propertyInfoArray = array();
-
-						foreach ($html->find('td') as $td) {
-							$possibleTdText = $td->plaintext;
-							if (strpos($possibleTdText, ':') !== false && strlen(trim($possibleTdText)) < 80) { // It's one of the table cells with info
-								$possibleTdArray = explode(':', $possibleTdText);
-
-								$propertyInfoArray[] = $possibleTdArray;
-							}
-						}
-
-						print_r($propertyInfoArray);
-
-						$propertyRow = array(
-							removeSpaces($propertyInfoArray[3][1]), // calle
-							removeSpaces($propertyInfoArray[5][1]), // portal
-							removeSpaces($propertyInfoArray[1][1]), // finca
-							removeSpaces($propertyInfoArray[4][1]), // ref. catastral
-							removeSpaces($propertyInfoArray[2][1]), // zona
-							str_replace('&euro;', '', removeSpaces($propertyInfoArray[6][1])), // valor suelo
-							str_replace('&euro;', '', removeSpaces($propertyInfoArray[7][1])), // valor catastral
-						);
-
-						// Now we get the info from locals
-						$tableToSearchIn = $html->find('table', 12);
-						foreach ($tableToSearchIn->find('tr') as $index => $localRow) {
-							if ($index == 0 || $index == 1) continue;
-
-							$propertyRowCopy = $propertyRow;
-
-							foreach ($localRow->find('td') as $td) {
-								$propertyRowCopy[] = $td->plaintext;
-							}
-
-							writeToCSV($pathToPropertiesCSV, $propertyRowCopy);
-						}
-
-					}
-
-				}
+				writeToCSV($pathToPropertiesCSV, $propertyRowCopy);
 			}
 
 		}
