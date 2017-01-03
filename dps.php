@@ -13,6 +13,7 @@ $urlPost = $urlBase . 'porDP.asp';
 $urlReferer = $urlPost;
 $municipio = 'DONOSTIA-SAN SEBASTIAN';
 $alreadyProperties = array();
+$propertyReferer = 'http://www4.gipuzkoa.net/ogasuna/catastro/refCatastral.asp';
 
 $pathToPortalsCSV = 'data/csvs/portals.csv';
 // Portal Titles
@@ -119,7 +120,6 @@ foreach ($streets as $street) {
 
 			if (!$link) continue;
 
-			$propertyReferer = 'http://www4.gipuzkoa.net/ogasuna/catastro/refCatastral.asp';
 			$propertyUrl = $link->href;
 			$propertyUrl = htmlspecialchars_decode($propertyUrl);
 			$url = $urlBase . $propertyUrl;
